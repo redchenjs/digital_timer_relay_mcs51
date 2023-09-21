@@ -6,6 +6,7 @@ clean:
 	rm -rf build
 
 PORT ?= /dev/ttyUSB0
+BAUD ?= 9600
 
 flash: all
-	stcgal build/main.ihx -p $(PORT)
+	stcgal build/main.ihx -p $(PORT) -b $(BAUD)

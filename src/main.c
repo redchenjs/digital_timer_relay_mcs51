@@ -8,10 +8,16 @@
 #include <8051.h>
 #include <stdint.h>
 
-#define RELAY   P1_7
 #define SEG_DAT P0
-#define KEY_DAT P1
 #define SEG_SEL P2
+
+#define KEY_DAT P1
+
+#define KEY_SET 0x01
+#define KEY_ADD 0x02
+#define KEY_SUB 0x04
+
+#define RLY_DAT P1_7
 
 // STC89C51RC 12T@12.000MHz
 #define FOSC  (12000000UL)
@@ -21,10 +27,11 @@
 // Common-Anode Display
 const uint8_t table[] = {0xc0, 0xf9, 0xa4, 0xb0, 0x99, 0x92, 0x82, 0xf8, 0x80, 0x90};
 
+static uint8_t count_10ms = 0, count_1s = 0;
 static uint8_t hour = 0, minute = 0, second = 0;
-static uint8_t mode = 0, count_10ms = 0, count_1s = 0;
+static uint8_t mode = 0, mode_flag = 0, mode_count = 0;
 
-void tf0_isr(void) __interrupt TF0_VECTOR
+void tf0_isr(void) __interrupt(TF0_VECTOR)
 {
     TL0 = T50MS & 0xff;
     TH0 = T50MS >> 8;
@@ -33,7 +40,7 @@ void tf0_isr(void) __interrupt TF0_VECTOR
         count_1s = 0;
 
         if (hour || minute || second) {
-            RELAY = 0;
+            RLY_DAT = 0;
 
             if (second-- == 0) {
                 second = 59;
@@ -47,12 +54,12 @@ void tf0_isr(void) __interrupt TF0_VECTOR
                 }
             }
         } else {
-            RELAY = 1;
+            RLY_DAT = 1;
         }
     }
 }
 
-void tf1_isr(void) __interrupt TF1_VECTOR
+void tf1_isr(void) __interrupt(TF1_VECTOR)
 {
     static uint8_t digit = 0, key_p = 0, key_n = 0;
 
@@ -62,20 +69,34 @@ void tf1_isr(void) __interrupt TF1_VECTOR
     if (++count_10ms == 10) {
         count_10ms = 0;
 
-        key_n = KEY_DAT & 0x07;
+        key_n = KEY_DAT & (KEY_SET | KEY_ADD | KEY_SUB);
 
-        if ((key_p & 0x01) && !(key_n & 0x01)) {
+        if (mode_flag) {
+            if (!(key_n & KEY_SET)) {
+                if (++mode_count == 100) {
+                    TR0 = 0;
+
+                    mode = 6;
+                    mode_flag = 0;
+                    mode_count = 0;
+
+                    count_1s = 0;
+                }
+            } else {
+                mode_flag = 0;
+                mode_count = 0;
+            }
+        }
+
+        if ((key_p & KEY_SET) && !(key_n & KEY_SET)) {
             if (mode == 0) {
-                TR0 = 0;
-
-                mode = 6;
-                count_1s = 0;
+                mode_flag = 1;
             } else if (--mode == 0) {
                 TR0 = 1;
             }
         }
 
-        if ((key_p & 0x02) && !(key_n & 0x02)) {
+        if ((key_p & KEY_ADD) && !(key_n & KEY_ADD)) {
             switch (mode) {
                 case 1:
                     second += 60 + 1;
@@ -104,7 +125,7 @@ void tf1_isr(void) __interrupt TF1_VECTOR
             second %= 60;
         }
 
-        if ((key_p & 0x04) && !(key_n & 0x04)) {
+        if ((key_p & KEY_SUB) && !(key_n & KEY_SUB)) {
             switch (mode) {
                 case 1:
                     second += 60 - 1;
